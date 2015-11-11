@@ -43,7 +43,8 @@ static int ref_counter[PWMDRV_NUM_DEVS] = {0,0,0,0};
 
 struct pwm_driver_info {
 	int minor;
-	int *value;
+	int *duty_ratio;
+    int *duty;
 };
 
 
@@ -54,14 +55,16 @@ static volatile uint32_t *gpio_base;
 #define DIGIT_BASE	14
 #define DIGITS		4
 #define BLANK		10
-#define	DEFAULT_REFRESH	65
+#define	DEFAULT_PWM_HZ	1000
+#define DEFAULT_PWM_PERIOD_NSEC 1 * 1000 * 1000 * 1000 / DEFAULT_PWM_HZ
 
 static struct hrtimer refresh_timer;
-static int display_refresh_hz = DEFAULT_REFRESH;
+static int pwm_hz = DEFAULT_PWM_HZ;
 static int display_digits = DIGITS;
-#define REFRESH_KTIME	 ktime_set( 0, (1000000000/DIGITS) / display_refresh_hz )
+#define REFRESH_KTIME	 ktime_set( 0, (1000000000/DIGITS) / pwm_hz )
 
-static int display_value[DIGITS] = {4,3,2,1};
+static int duty_ratio_list[DIGITS] = {4,3,2,1};
+static int duty_list[DIGITS] = {0,0,0,0};
 
 /* proto types */
 static int rpi_gpio_map(void);
@@ -138,12 +141,12 @@ static void led_put( unsigned int v )
 
 static void register_refresh_timer(void)
 {
-	if( (display_refresh_hz < 1) || (display_refresh_hz >= 1000000000/DIGITS) )
-		display_refresh_hz = DEFAULT_REFRESH;
+	if( (pwm_hz < 1) || (pwm_hz >= 1000000000/DIGITS) )
+		pwm_hz = DEFAULT_PWM_HZ;
 	
 	hrtimer_init(&refresh_timer, HRTIMER_MODE_ABS, HRTIMER_MODE_REL);
 	refresh_timer.function = refresh_timer_handler;
-	hrtimer_start(&refresh_timer, REFRESH_KTIME, HRTIMER_MODE_REL );
+	hrtimer_start(&refresh_timer, ktime_set(0, DEFAULT_PWM_PERIOD_NSEC), HRTIMER_MODE_REL );
 }
 
 static enum hrtimer_restart refresh_timer_handler(struct hrtimer *timer)
@@ -156,10 +159,10 @@ static enum hrtimer_restart refresh_timer_handler(struct hrtimer *timer)
 	led_put(BLANK);
 	rpi_gpio_clear32( RPI_GPIO_P1MASK, 0x03 << DIGIT_BASE);
 	rpi_gpio_set32( RPI_GPIO_P1MASK, (dig) << DIGIT_BASE);
-	led_put(display_value[dig]);
+	led_put(duty_ratio_list[dig]);
 	
-	if( (display_refresh_hz < 1) || (display_refresh_hz >= 1000000000/DIGITS) )
-		display_refresh_hz = DEFAULT_REFRESH;
+	if( (pwm_hz < 1) || (pwm_hz >= 1000000000/DIGITS) )
+		pwm_hz = DEFAULT_PWM_HZ;
 	
 	now = ktime_get();
     hrtimer_forward(timer, now, REFRESH_KTIME );
@@ -179,7 +182,8 @@ static int pwm_driver_open(struct inode *inode, struct file *filep)
 		
 		info = (struct pwm_driver_info *)kmalloc(sizeof(struct pwm_driver_info), GFP_KERNEL);
 		info->minor = minor;
-		info->value = &(display_value[minor]);
+		info->duty_ratio = &(duty_ratio_list[minor]);
+        info->duty = &(duty_list[minor]);
 		filep->private_data = (void *)info;
 		retval = 0;
 	}
@@ -211,11 +215,15 @@ static ssize_t pwm_driver_write(
     loff_t *f_pos)
 {
 	struct pwm_driver_info *info = (struct pwm_driver_info *)filep->private_data;
+    int pwm_period_nsec;
 	
 	if(count > 0) {
-		if(copy_from_user( info->value, buf, sizeof(char) )) {
+		if(copy_from_user( info->duty_ratio, buf, sizeof(char) )) {
 			return -EFAULT;
 		}
+        pwm_period_nsec = 1 * 1000 * 1000 * 1000 / pwm_hz;
+        *info->duty = *info->duty_ratio * pwm_period_nsec / 100;
+	    printk(KERN_INFO "%s *info->duty = %d\n", PWMDRV_DEVNAME, *info->duty);
 		return sizeof(char);
 	}
 	return 0;
@@ -338,5 +346,5 @@ static void pwm_driver_exit(void)
 module_init(pwm_driver_init);
 module_exit(pwm_driver_exit);
 
-module_param( display_refresh_hz, int, S_IRUSR | S_IRGRP | S_IROTH |  S_IWUSR );
-module_param_array( display_value, int, &display_digits ,S_IRUSR | S_IRGRP | S_IROTH |  S_IWUSR );
+module_param( pwm_hz, int, S_IRUSR | S_IRGRP | S_IROTH |  S_IWUSR );
+module_param_array( duty_ratio_list, int, &display_digits ,S_IRUSR | S_IRGRP | S_IROTH |  S_IWUSR );
