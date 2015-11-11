@@ -63,8 +63,12 @@ static int pwm_hz = DEFAULT_PWM_HZ;
 static int display_digits = DIGITS;
 #define REFRESH_KTIME	 ktime_set( 0, (1000000000/DIGITS) / pwm_hz )
 
-static int duty_ratio_list[DIGITS] = {4,3,2,1};
+static int duty_ratio_list[DIGITS] = {40,30,20,10};
 static int duty_list[DIGITS] = {0,0,0,0};
+static int pinnum_list[DIGITS] = {0,1,2,3};
+
+static int list_size = DIGITS;
+static int duty_next_counter = 0;
 
 /* proto types */
 static int rpi_gpio_map(void);
@@ -78,6 +82,32 @@ static void register_refresh_timer(void);
 static enum hrtimer_restart refresh_timer_handler(struct hrtimer *);
 static int pwm_driver_init(void);
 static void pwm_driver_exit(void);
+
+/*----- print_lists() -----*/
+void print_lists(int *p_lists, int p_size) {
+    int i;
+    for (i = 0; i < p_size; i++) {
+        printk(KERN_INFO "%d", p_lists[i]);
+    }
+}
+
+/*----- sort_function() -----*/
+static void sort_function(int *p_mainlist, int *p_sublist) {
+    int i,j,maintmp,subtmp;
+    for (i = 0; i < list_size -1; i++) {
+        for (j = list_size - 1; j > i; j--) {
+            if ( p_mainlist[j] < p_mainlist[j-1]) {
+                maintmp = p_mainlist[j];
+                p_mainlist[j] = p_mainlist[j-1];
+                p_mainlist[j-1] = maintmp;
+
+                subtmp = p_sublist[j];
+                p_sublist[j] = p_sublist[j-1];
+                p_sublist[j-1] = subtmp;
+            }
+        }
+    }
+}
 
 static int rpi_gpio_map(void)
 {
@@ -216,14 +246,49 @@ static ssize_t pwm_driver_write(
 {
 	struct pwm_driver_info *info = (struct pwm_driver_info *)filep->private_data;
     int pwm_period_nsec;
+    int i,j;
 	
 	if(count > 0) {
 		if(copy_from_user( info->duty_ratio, buf, sizeof(char) )) {
 			return -EFAULT;
 		}
+        list_size = DIGITS;
         pwm_period_nsec = 1 * 1000 * 1000 * 1000 / pwm_hz;
-        *info->duty = *info->duty_ratio * pwm_period_nsec / 100;
-	    printk(KERN_INFO "%s *info->duty = %d\n", PWMDRV_DEVNAME, *info->duty);
+
+        /**info->duty = *info->duty_ratio * pwm_period_nsec / 100;
+	    printk(KERN_INFO "%s: *info->duty = %d\n", PWMDRV_DEVNAME, *info->duty);
+        print_lists(duty_list, list_size);*/
+
+        for (i = 0; i < list_size; i++) {
+            duty_list[i] = duty_ratio_list[i] * pwm_period_nsec / 100;
+        }
+
+        printk(KERN_INFO "%s: duty_ratio_list[0] = %d\n", PWMDRV_DEVNAME, duty_ratio_list[0]);
+        printk(KERN_INFO "%s: duty_ratio_list[1] = %d\n", PWMDRV_DEVNAME, duty_ratio_list[1]);
+        printk(KERN_INFO "%s: duty_ratio_list[2] = %d\n", PWMDRV_DEVNAME, duty_ratio_list[2]);
+        printk(KERN_INFO "%s: duty_ratio_list[3] = %d\n", PWMDRV_DEVNAME, duty_ratio_list[3]);
+
+        printk(KERN_INFO "%s: duty_list[0] = %d\n", PWMDRV_DEVNAME, duty_list[0]);
+        printk(KERN_INFO "%s: duty_list[1] = %d\n", PWMDRV_DEVNAME, duty_list[1]);
+        printk(KERN_INFO "%s: duty_list[2] = %d\n", PWMDRV_DEVNAME, duty_list[2]);
+        printk(KERN_INFO "%s: duty_list[3] = %d\n", PWMDRV_DEVNAME, duty_list[3]);
+
+        sort_function(duty_list, pinnum_list);
+        for (i = 0; i < list_size-1; i++) {
+            if (!duty_list[i]) {
+                for (j = i; j < list_size-1; j++) {
+                    duty_list[j] = duty_list[j+1];
+                    pinnum_list[j] = pinnum_list[j+1];
+                }
+                list_size--;
+            }
+        }
+        printk(KERN_INFO "%s: list_size=%d\n", PWMDRV_DEVNAME, list_size);
+
+        printk(KERN_INFO "%s: duty_list[0] = %d\n", PWMDRV_DEVNAME, duty_list[0]);
+        printk(KERN_INFO "%s: duty_list[1] = %d\n", PWMDRV_DEVNAME, duty_list[1]);
+        printk(KERN_INFO "%s: duty_list[2] = %d\n", PWMDRV_DEVNAME, duty_list[2]);
+        printk(KERN_INFO "%s: duty_list[3] = %d\n", PWMDRV_DEVNAME, duty_list[3]);
 		return sizeof(char);
 	}
 	return 0;
@@ -298,7 +363,7 @@ static int pwm_driver_init(void)
 	int retval;
 	
 	/* 開始のメッセージ */
-	printk(KERN_INFO "%s loading...\n", PWMDRV_DEVNAME );
+	printk(KERN_INFO "%s: loading...\n", PWMDRV_DEVNAME );
 	
 	/* GPIOレジスタがマップ可能か調べる */
 	retval = rpi_gpio_map();
@@ -317,7 +382,7 @@ static int pwm_driver_init(void)
 	spin_lock_init(&pwm_driver_spinlock);
 	register_refresh_timer();
 
-	printk( KERN_INFO "pwm_driver driver register sccessed.\n");
+	printk( KERN_INFO "pwm_driver: driver register sccessed.\n");
 	
 	return 0;
 }
