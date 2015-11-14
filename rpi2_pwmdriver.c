@@ -55,7 +55,7 @@ static volatile uint32_t *gpio_base;
 #define DIGIT_BASE	14
 #define DIGITS		4
 #define BLANK		10
-#define	DEFAULT_PWM_HZ	5
+#define	DEFAULT_PWM_HZ	1000
 #define DEFAULT_PWM_PERIOD_NSEC 1 * 1000 * 1000 * 1000 / DEFAULT_PWM_HZ
 
 static struct hrtimer refresh_timer;
